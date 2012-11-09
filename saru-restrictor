@@ -1,0 +1,47 @@
+#!/bin/bash
+
+logfile="$HOME/.local/var/log/ssh-restrict-ma.log"
+TZ="America/New_York"
+thishost=$(hostname)
+email="kccricket@gmail.com"
+goodsum="2aa8613dda4bafe38906ee7541db52ed7f658e23"
+tempdir="$HOME/.cache"
+
+function log_out {
+	# $1 accepted or rejected
+	# $2 reason:
+	echo $(date)": SSH connection ${1} from ${SSH_CONNECTION%% *}; ${2}${SSH_ORIGINAL_COMMAND}" >> $logfile
+}
+
+function log_email {
+	echo "Possible intrusion attempt at $thishost from ${SSH_CONNECTION%% *}. Attempted command: $SSH_ORIGINAL_COMMAND" | mailx -s "Intrusion attempt at $thishost" $email
+}
+
+case "$SSH_ORIGINAL_COMMAND" in
+	*\&*|*\(*|*\{*|*\;*|*\<*|*\`*|*\|*|*\$*)
+		log_out "rejected" "disallowed character: "
+		log_email
+		exit 1
+		;;
+	"${tempdir}/aide "*)
+		sum=$(sha1sum "$tempdir/aide")
+		if [ "${sum%% *}" != "$goodsum" ]; then
+			log_out "rejected" "integrity check failure: "
+			log_email
+			exit 1
+		fi
+		;&
+	"scp -d -t .cache"|\
+	"scp -f $tempdir/aide.db.new"|\
+    "rm $tempdir/aide $tempdir/aide.conf $tempdir/aide.db"|\
+	"rm $tempdir/aide $tempdir/aide.conf $tempdir/aide.db.new")
+		log_out "accepted"
+		$SSH_ORIGINAL_COMMAND
+		exit 0
+		;;
+	*)
+		log_out "rejected" "unrecognized command: "
+		log_email
+		exit 1
+		;;
+esac

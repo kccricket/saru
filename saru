@@ -1,0 +1,60 @@
+#!/bin/sh
+
+set -e
+
+remotehost="kccricket@clusterblue.com"
+remotedir="/external/kccricket/.cache"
+localdir="$HOME/aide/clusterblue"
+logfile="$HOME/.local/var/log/aide-clusterblue.log"
+port="69"
+
+case "$1" in
+	"check")
+		echo -n $(date) "Beginning AIDE integrity check on $remotehost... " >> $logfile
+		cd "$localdir"
+
+		scp -q -B -P "$port" aide aide.conf aide.db "$remotehost:$remotedir"
+
+		result=$(ssh -q -p "$port" "$remotehost" "$remotedir/aide" --config="$remotedir/aide.conf" --check)
+
+		ssh -q -p "$port" "$remotehost" rm "$remotedir/aide" "$remotedir/aide.conf" "$remotedir/aide.db"
+
+		if [ "$result" != "" ]; then
+			echo "$result" | mailx -s "AIDE report for $remotehost" kccricket@gmail.com
+		fi
+	;;
+	"sign")
+		if [ ! -r "$2" ]; then
+			echo "Configuration file is not readable."
+			exit 1
+		fi
+
+		cp "$2" "$3"
+
+		patch=$(aide -c "$3" -B "root_prefix=$HOME" --config-check)
+
+		if [ "$?" != "0" ]; then
+			echo "Signature generation failed."
+			exit 1
+		fi
+
+		echo "$patch" | patch "$3"
+	;;
+	"init")
+		scp -q -B -P "$port" "$localdir/aide" "$localdir/aide.conf" "$remotehost:$remotedir"
+		ssh -q -p "$port" "$remotehost" "$remotedir/aide" --init --config "$remotedir/aide.conf"
+		scp -q -B -P "$port" "$remotehost:$remotedir/aide.db.new" "$localdir"
+		ssh -q -p "$port" "$remotehost" rm "$remotedir/aide" "$remotedir/aide.conf" "$remotedir/aide.db.new"
+		
+		if [ -a "$localdir/aide.db" ]; then
+			if [ -a "$localdir/aide.db.old" ]; then
+				rm "$localdir/aide.db.old"
+			fi
+			
+			mv "$localdir/aide.db" "$localdir/aide.db.old"
+		fi
+		
+		mv "$localdir/aide.db.new" "$localdir/aide.db"
+	;;
+esac
+
